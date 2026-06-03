@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador DevOps · 1355 Preguntas</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .smooth { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        select {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23333' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 1rem center;
+            padding-right: 2.5rem;
+        }
+        .respuesta-btn {
+            cursor: pointer;
+            position: relative;
+        }
+        .respuesta-btn:hover {
+            transform: translateX(4px);
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="app"></div>
+
+    <script>
+        // ====================== SIMULADOR APP ======================
+        class SimuladorApp {
+            constructor() {
+                this.allQuestions = [];
+                this.currentQuestions = [];
+                this.currentIndex = 0;
+                this.answers = {};
+                this.phase = "setup"; // setup | quiz
+                this.questionsCount = 25;
+                this.selectedCategory = "Todas";
+                this.showExplanation = false;
+            }
+
+            async loadQuestions() {
+                try {
+                    const response = await fetch('../dist/data/banco-preguntas-completo.json?v=' + Date.now());
+                    const data = await response.json();
+
+                    // Extraer todas las preguntas de todas las categorías
+                    let allQuestions = [];
+                    data.banco.categorías.forEach(catObj => {
+                        catObj.preguntas.forEach(q => {
+                            allQuestions.push({
+                                ...q,
+                                _categoryName: catObj.nombre
+                            });
+                        });
+                    });
+
+                    // Convertir formato para compatibilidad con la app
+                    this.allQuestions = allQuestions.map(q => ({
+                        id: q.id,
+                        categoria: q._categoryName,
+                        dificultad: q.dificultad,
+                        pregunta: q.pregunta,
+                        opciones: q.opciones.map(o => o.texto),
+                        respuestaCorrecta: q.opciones.findIndex(o => o.letra === q.respuestaCorrecta),
+                        argumentacion: q.argumentacion,
+                        subcategoria: q.subcategoria
+                    }));
+
+                    this.render();
+                } catch (e) {
+                    console.error('Error cargando preguntas:', e);
+                    this.allQuestions = this.getDefaultQuestions();
+                    this.render();
+                }
+            }
+
+            getCategoryName(questionId) {
+                const ranges = {
+                    'Software Architect': [1, 50],
+                    'ASP.NET Core': [51, 100],
+                    'Microsoft Azure': [101, 150],
+                    'DevOps': [151, 200],
+                    'Microsoft SQL Server': [201, 250],
+                    'Psicométrica · Series': [251, 300],
+                    'Psicométrica · Secuencias': [301, 350],
+                    'Psicométrica · Imagen Faltante': [351, 400],
+                    'Psicométrica · Razonamiento': [401, 450],
+                    'Psicométrica · Porcentajes': [451, 500]
+                };
+
+                for (const [category, [min, max]] of Object.entries(ranges)) {
+                    if (questionId >= min && questionId <= max) return category;
+                }
+                return 'General';
+            }
+
+            getDefaultQuestions() {
+                // Preguntas en caso de no cargar el JSON
+                return [
+                    {
+                        id: 1,
+                        categoria: "Software Architect",
+                        dificultad: "easy",
+                        pregunta: "En una arquitectura distribuida, ¿qué principio ayuda más a reducir el acoplamiento?",
+                        opciones: ["Comunicación síncrona", "Interfaces bien definidas", "Acceso directo a BD", "Variables globales"],
+                        respuestaCorrecta: 1,
+                        explicacion: "Los contratos estables e interfaces claras reducen acoplamiento y mejoran mantenibilidad."
+                    },
+                    {
+                        id: 2,
+                        categoria: "ASP.NET Core",
+                        dificultad: "medium",
+                        pregunta: "¿Cuál es la forma recomendada de inyectar dependencias en ASP.NET Core?",
+                        opciones: ["Variables estáticas", "Inyección mediante contenedor DI", "Copiar objetos manualmente", "Herencia múltiple"],
+                        respuestaCorrecta: 1,
+                        explicacion: "ASP.NET Core integra un contenedor de dependencia desde el arranque."
+                    },
+                    {
+                        id: 3,
+                        categoria: "Microsoft Azure",
+                        dificultad: "hard",
+                        pregunta: "¿Qué servicio de Azure se usa para almacenar secretos y certificados?",
+                        opciones: ["Azure Boards", "Azure Key Vault", "Azure Front Door", "Azure Data Studio"],
+                        respuestaCorrecta: 1,
+                        explicacion: "Key Vault centraliza y protege secretos y certificados."
+                    }
+                ];
+            }
+
+            shuffleArray(arr) {
+                const copy = [...arr];
+                for (let i = copy.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [copy[i], copy[j]] = [copy[j], copy[i]];
+                }
+                return copy;
+            }
+
+            // Mezclar opciones VARIANDO LA RESPUESTA CORRECTA
+            shuffleOptions(opciones, respuestaCorrecta) {
+                const withIndices = opciones.map((opt, idx) => ({
+                    texto: opt,
+                    original: idx
+                }));
+                const shuffled = this.shuffleArray(withIndices);
+
+                return {
+                    opciones: shuffled.map(o => o.texto),
+                    newCorrectIndex: shuffled.findIndex(o => o.original === respuestaCorrecta)
+                };
+            }
+
+            getCategories() {
+                if (this.allQuestions.length === 0) return ["Todas"];
+                const cats = [...new Set(this.allQuestions.map(q => q.categoria))];
+                return ["Todas", ...cats.sort()];
+            }
+
+            loadQuestionsByCategory() {
+                let filtered = this.allQuestions;
+
+                if (this.selectedCategory !== "Todas") {
+                    filtered = filtered.filter(q => q.categoria === this.selectedCategory);
+                }
+
+                // Mezclar opciones UNA SOLA VEZ al cargar cada pregunta
+                this.currentQuestions = filtered.slice(0, this.questionsCount).map(q => {
+                    const shuffled = this.shuffleOptions(q.opciones, q.respuestaCorrecta);
+                    return {
+                        ...q,
+                        _shuffledOpciones: shuffled.opciones,
+                        _shuffledCorrectIndex: shuffled.newCorrectIndex
+                    };
+                });
+
+                this.currentIndex = 0;
+                this.answers = {};
+            }
+
+            startQuiz() {
+                this.loadQuestionsByCategory();
+                this.phase = "quiz";
+                this.render();
+            }
+
+            goToSetup() {
+                this.phase = "setup";
+                this.render();
+            }
+
+            answerQuestion(selectedIndex) {
+                const q = this.currentQuestions[this.currentIndex];
+                if (!q) return;
+                // Guardar el índice seleccionado por el usuario
+                this.answers[q.id] = selectedIndex;
+                this.render();
+            }
+
+            nextQuestion() {
+                if (this.currentIndex < this.currentQuestions.length - 1) {
+                    this.currentIndex++;
+                    this.showExplanation = false;
+                    this.render();
+                }
+            }
+
+            prevQuestion() {
+                if (this.currentIndex > 0) {
+                    this.currentIndex--;
+                    this.showExplanation = false;
+                    this.render();
+                }
+            }
+
+            resetQuiz() {
+                this.answers = {};
+                this.currentIndex = 0;
+                this.showExplanation = false;
+                this.render();
+            }
+
+            getStats() {
+                const answered = Object.keys(this.answers).length;
+                let correct = 0;
+
+                // Contar respuestas correctas comparando índice seleccionado con índice correcto
+                this.currentQuestions.forEach(q => {
+                    if (this.answers[q.id] !== undefined) {
+                        if (this.answers[q.id] === q._shuffledCorrectIndex) {
+                            correct++;
+                        }
+                    }
+                });
+
+                const percentage = this.currentQuestions.length ? Math.round((correct / this.currentQuestions.length) * 100) : 0;
+                return { answered, correct, percentage, total: this.currentQuestions.length };
+            }
+
+            renderSetup() {
+                const categories = this.getCategories();
+                const maxAvailable = this.selectedCategory === "Todas"
+                    ? this.allQuestions.length
+                    : this.allQuestions.filter(q => q.categoria === this.selectedCategory).length;
+
+                return `
+                    <div class="min-h-screen gradient-bg flex items-center justify-center p-4">
+                        <div class="w-full max-w-md">
+                            <div class="text-center mb-8">
+                                <div class="text-6xl mb-4">📚</div>
+                                <h1 class="text-4xl font-bold text-white mb-2">Simulador DevOps</h1>
+                                <p class="text-purple-100">Más de 500 preguntas reales</p>
+                            </div>
+
+                            <div class="bg-white rounded-2xl shadow-2xl p-8 space-y-6">
+                                <!-- Cantidad -->
+                                <div>
+                                    <label class="block text-sm font-bold text-gray-700 mb-3">
+                                        📊 Preguntas: <span class="text-purple-600 text-xl">${this.questionsCount}</span>
+                                    </label>
+                                    <div class="flex flex-wrap gap-2 mb-3">
+                                        ${[10, 25, 50, 75, 100].map(n => `
+                                            <button onclick="app.questionsCount=${n}; app.render();"
+                                                class="px-4 py-2 rounded-lg font-bold smooth ${
+                                                    this.questionsCount === n
+                                                    ? 'bg-purple-600 text-white'
+                                                    : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+                                                }">
+                                                ${n}
+                                            </button>
+                                        `).join('')}
+                                    </div>
+                                    <input type="range" min="5" max="${Math.min(maxAvailable, 500)}" value="${this.questionsCount}"
+                                        onchange="app.questionsCount=parseInt(this.value); app.render();"
+                                        class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                                </div>
+
+                                <!-- Categoría -->
+                                <div>
+                                    <label class="block text-sm font-bold text-gray-700 mb-3">📂 Categoría</label>
+                                    <select onchange="app.selectedCategory=this.value; app.render();"
+                                        class="w-full px-4 py-3 rounded-lg border-2 border-purple-300 focus:border-purple-600 focus:outline-none text-gray-900">
+                                        ${categories.map(c => `<option value="${c}" ${this.selectedCategory === c ? 'selected' : ''}>${c}</option>`).join('')}
+                                    </select>
+                                </div>
+
+                                <div class="bg-purple-50 border-2 border-purple-200 rounded-lg p-4">
+                                    <p class="text-sm font-bold text-purple-900">
+                                        ✅ <span class="text-lg text-purple-700">${maxAvailable}</span> preguntas disponibles
+                                    </p>
+                                </div>
+
+                                <button onclick="app.startQuiz();"
+                                    ${maxAvailable === 0 ? 'disabled' : ''}
+                                    class="w-full py-4 px-6 rounded-lg font-bold text-lg smooth ${
+                                        maxAvailable === 0
+                                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                        : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:shadow-lg hover:scale-105'
+                                    }">
+                                    🚀 ${maxAvailable === 0 ? 'Sin preguntas' : `Comenzar Quiz (${this.questionsCount})`}
+                                </button>
+                            </div>
+
+                            <div class="grid grid-cols-3 gap-3 mt-6">
+                                <div class="bg-white rounded-lg p-4 text-center shadow">
+                                    <div class="text-3xl font-bold text-blue-600">${this.allQuestions.length}</div>
+                                    <p class="text-xs text-gray-600 mt-1">Totales</p>
+                                </div>
+                                <div class="bg-white rounded-lg p-4 text-center shadow">
+                                    <div class="text-3xl font-bold text-purple-600">${categories.length - 1}</div>
+                                    <p class="text-xs text-gray-600 mt-1">Categorías</p>
+                                </div>
+                                <div class="bg-white rounded-lg p-4 text-center shadow">
+                                    <div class="text-3xl font-bold text-green-600">4</div>
+                                    <p class="text-xs text-gray-600 mt-1">Opciones</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderQuiz() {
+                const q = this.currentQuestions[this.currentIndex];
+                if (!q) return '<div class="text-center p-8">Sin preguntas</div>';
+
+                const stats = this.getStats();
+                const answered = this.answers[q.id];
+
+                return `
+                    <div class="min-h-screen bg-gray-50 p-4 md:p-8">
+                        <div class="max-w-5xl mx-auto">
+                            <!-- Header -->
+                            <div class="flex justify-between items-center mb-6 flex-wrap gap-4">
+                                <h1 class="text-3xl font-bold text-gray-900">🧠 Quiz en Progreso</h1>
+                                <button onclick="app.goToSetup();" class="px-4 py-2 bg-gray-200 text-gray-900 rounded-lg hover:bg-gray-300 font-semibold smooth">
+                                    ⚙️ Configurar
+                                </button>
+                            </div>
+
+                            <!-- Estadísticas -->
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                                <div class="bg-white rounded-lg p-4 shadow-md">
+                                    <div class="text-xs text-gray-600 font-bold uppercase">Pregunta</div>
+                                    <div class="text-3xl font-bold text-gray-900">${this.currentIndex + 1}/<span class="text-lg">${stats.total}</span></div>
+                                </div>
+                                <div class="bg-white rounded-lg p-4 shadow-md">
+                                    <div class="text-xs text-gray-600 font-bold uppercase">Respondidas</div>
+                                    <div class="text-3xl font-bold text-blue-600">${stats.answered}</div>
+                                </div>
+                                <div class="bg-white rounded-lg p-4 shadow-md">
+                                    <div class="text-xs text-gray-600 font-bold uppercase">Correctas</div>
+                                    <div class="text-3xl font-bold text-green-600">${stats.correct}</div>
+                                </div>
+                                <div class="bg-white rounded-lg p-4 shadow-md">
+                                    <div class="text-xs text-gray-600 font-bold uppercase">Progreso</div>
+                                    <div class="text-3xl font-bold text-purple-600">${stats.percentage}%</div>
+                                </div>
+                            </div>
+
+                            <!-- Barra de progreso -->
+                            <div class="bg-white rounded-lg p-4 shadow-md mb-6">
+                                <div class="flex justify-between mb-2">
+                                    <span class="text-xs font-bold text-gray-700">Progreso General</span>
+                                    <span class="text-xs text-gray-600">${stats.answered} de ${stats.total}</span>
+                                </div>
+                                <div class="w-full bg-gray-200 rounded-full h-2">
+                                    <div class="bg-gradient-to-r from-purple-600 to-pink-600 h-2 rounded-full smooth" style="width: ${stats.percentage}%"></div>
+                                </div>
+                            </div>
+
+                            <!-- Pregunta -->
+                            <div class="bg-white rounded-lg shadow-lg overflow-hidden mb-6">
+                                <div class="bg-gradient-to-r from-purple-100 to-pink-100 p-6 border-b-4 border-purple-300">
+                                    <div class="flex gap-2 flex-wrap mb-4">
+                                        <span class="bg-purple-200 text-purple-800 px-3 py-1 rounded-full text-xs font-bold">📌 ${q.categoria}</span>
+                                        <span class="bg-yellow-200 text-yellow-800 px-3 py-1 rounded-full text-xs font-bold">⭐ ${q.dificultad}</span>
+                                        <span class="bg-gray-300 text-gray-800 px-3 py-1 rounded-full text-xs font-bold ml-auto">${this.currentIndex + 1}/${stats.total}</span>
+                                    </div>
+                                    <h2 class="text-xl md:text-2xl font-bold text-gray-900 leading-relaxed">${q.pregunta}</h2>
+                                </div>
+
+                                <div class="p-6 space-y-3">
+                                    <!-- Opciones -->
+                                    ${q._shuffledOpciones.map((opt, idx) => {
+                                        const isCorrect = idx === q._shuffledCorrectIndex;
+                                        const userSelected = idx === answered;
+                                        const answered_defined = answered !== undefined;
+
+                                        return `
+                                            <button onclick="app.answerQuestion(${idx});"
+                                                class="respuesta-btn w-full text-left px-5 py-4 rounded-lg border-2 smooth font-medium ${
+                                                    !answered_defined
+                                                    ? 'bg-white border-gray-300 text-gray-900 hover:border-purple-400 hover:bg-purple-50 cursor-pointer' :
+                                                    isCorrect && userSelected
+                                                    ? 'bg-green-50 border-green-500 text-green-900 cursor-default' :
+                                                    isCorrect
+                                                    ? 'bg-green-50 border-green-400 text-green-900 cursor-default' :
+                                                    userSelected
+                                                    ? 'bg-red-50 border-red-500 text-red-900 cursor-default' :
+                                                    'bg-gray-50 border-gray-300 text-gray-900 cursor-default'
+                                                }">
+                                                <div class="flex items-center justify-between">
+                                                    <span>
+                                                        <span class="font-bold text-lg mr-3">${String.fromCharCode(65 + idx)}.</span>
+                                                        ${opt}
+                                                    </span>
+                                                    <span>
+                                                        ${answered_defined && isCorrect && userSelected ? '✅ Correcto' : ''}
+                                                        ${answered_defined && isCorrect && !userSelected ? '✓ Correcta' : ''}
+                                                        ${answered_defined && userSelected && !isCorrect ? '❌ Incorrecta' : ''}
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        `;
+                                    }).join('')}
+
+                                    <!-- Explicación -->
+                                    ${answered !== undefined ? `
+                                        <div class="bg-blue-50 border-l-4 border-blue-500 rounded p-5 mt-6">
+                                            <p class="text-sm font-bold text-blue-900 mb-2">💡 Explicación:</p>
+                                            <p class="text-sm text-blue-800 leading-relaxed">${q.argumentacion}</p>
+                                        </div>
+                                    ` : ''}
+
+                                    <!-- Navegación -->
+                                    <div class="flex gap-3 pt-4 border-t border-gray-200 flex-wrap">
+                                        <button onclick="app.prevQuestion();" ${this.currentIndex === 0 ? 'disabled' : ''}
+                                            class="px-4 py-2 rounded-lg border border-gray-300 text-gray-900 font-semibold smooth disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100">
+                                            ← Anterior
+                                        </button>
+                                        <div class="flex gap-3 flex-1">
+                                            <button onclick="app.showExplanation = !app.showExplanation; app.render();"
+                                                class="flex-1 px-4 py-2 rounded-lg border border-gray-300 bg-gray-100 text-gray-900 font-semibold smooth hover:bg-gray-200">
+                                                ${this.showExplanation ? '🙈 Ocultar' : '👁️ Mostrar'} explicación
+                                            </button>
+                                            <button onclick="app.nextQuestion();" ${this.currentIndex === stats.total - 1 || answered === undefined ? 'disabled' : ''}
+                                                class="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold smooth disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg">
+                                                Siguiente →
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Controles -->
+                            ${stats.answered > 0 ? `
+                                <div class="flex gap-3 mb-6">
+                                    <button onclick="app.resetQuiz();" class="flex-1 px-4 py-3 rounded-lg bg-gray-200 text-gray-900 font-semibold smooth hover:bg-gray-300">
+                                        🔄 Reiniciar Quiz
+                                    </button>
+                                </div>
+                            ` : ''}
+
+                            <!-- Resultado final -->
+                            ${stats.answered === stats.total && stats.total > 0 ? `
+                                <div class="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-lg p-8 text-center">
+                                    <h3 class="text-3xl font-bold text-green-700 mb-4">🎉 ¡Quiz Completado!</h3>
+                                    <div class="grid grid-cols-3 gap-4 mb-6">
+                                        <div>
+                                            <div class="text-4xl font-bold text-green-600">${stats.correct}</div>
+                                            <p class="text-sm text-green-600 mt-1">Correctas</p>
+                                        </div>
+                                        <div class="border-l-2 border-r-2 border-green-200">
+                                            <div class="text-4xl font-bold text-red-600">${stats.total - stats.correct}</div>
+                                            <p class="text-sm text-red-600 mt-1">Incorrectas</p>
+                                        </div>
+                                        <div>
+                                            <div class="text-4xl font-bold text-purple-600">${stats.percentage}%</div>
+                                            <p class="text-sm text-purple-600 mt-1">Acierto</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+
+            render() {
+                const html = this.phase === "setup" ? this.renderSetup() : this.renderQuiz();
+                document.getElementById('app').innerHTML = html;
+            }
+        }
+
+        // ====================== INICIAR ======================
+        const app = new SimuladorApp();
+        app.loadQuestions();
+    </script>
+</body>
+</html>
