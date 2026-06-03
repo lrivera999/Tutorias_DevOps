@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd \"[PON TU RUTA DE TRABAJO NO SEAS CONCHUDO]\"; python -m http.server 8888 | Out-Null &)",
+      "mcp__Claude_Preview__preview_start",
+      "PowerShell(Get-Job)",
+      "PowerShell(Stop-Job)",
+      "PowerShell(Remove-Job)",
+      "PowerShell(cd \"[PON TU RUTA DE TRABAJO NO SEAS CONCHUDO]\"; Get-ChildItem | Where-Object {$_.Extension -in @\\(\".html\", \".json\", \".db\", \".md\"\\) -or $_.Name -eq \".claude\"} | Select-Object Name, Length | Format-Table)"
+    ]
+  }
+}
